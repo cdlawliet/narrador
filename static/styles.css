@@ -45,7 +45,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -394,7 +395,7 @@ a {
   font-weight: 750;
 }
 
-.form-section legend span {
+.form-section legend > span:first-child {
   display: grid;
   width: 23px;
   height: 23px;
@@ -403,6 +404,118 @@ a {
   border-radius: 7px;
   background: var(--lime);
   font-size: 0.69rem;
+}
+
+.legend-label {
+  display: inline;
+}
+
+.mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mode-option {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  min-height: 78px;
+  padding: 13px 38px 13px 13px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.mode-option:hover {
+  border-color: #aab4ae;
+  transform: translateY(-2px);
+}
+
+.mode-option:has(input:focus-visible) {
+  outline: 3px solid rgba(255, 112, 72, 0.24);
+  outline-offset: 2px;
+}
+
+.mode-option:has(input:checked) {
+  border-color: var(--ink);
+  background: #f7faed;
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.mode-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mode-option__icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  color: var(--accent-dark);
+  border-radius: 12px;
+  background: #ffe2d7;
+}
+
+.mode-option__icon--text {
+  color: #315d52;
+  background: var(--green-soft);
+}
+
+.mode-option__icon svg {
+  width: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.mode-option__copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.mode-option__copy strong {
+  font-size: 0.8rem;
+  line-height: 1.2;
+}
+
+.mode-option__copy small {
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+}
+
+.mode-option__check {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid #aab4ae;
+  border-radius: 50%;
+  transform: translateY(-50%);
+}
+
+.mode-option:has(input:checked) .mode-option__check {
+  border: 4px solid var(--ink);
+  background: var(--lime);
+}
+
+.mode-help {
+  min-height: 2.7em;
+  margin: 9px 2px 0;
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+  line-height: 1.45;
 }
 
 .drop-zone {
@@ -1045,6 +1158,18 @@ a {
   .drop-zone__icon {
     width: 46px;
     height: 46px;
+  }
+
+  .mode-switch {
+    grid-template-columns: 1fr;
+  }
+
+  .mode-option {
+    min-height: 70px;
+  }
+
+  .mode-help {
+    min-height: 0;
   }
 
   .voice-grid {

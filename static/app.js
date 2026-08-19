@@ -2,13 +2,20 @@
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const form = document.querySelector("#narrationForm");
+const modeInputs = document.querySelectorAll('input[name="narrationMode"]');
 const fileInput = document.querySelector("#subtitleInput");
 const dropZone = document.querySelector("#dropZone");
+const modeHelp = document.querySelector("#modeHelp");
+const fileLegendText = document.querySelector("#fileLegendText");
+const dropPrompt = document.querySelector("#dropPrompt");
+const dropHint = document.querySelector("#dropHint");
 const selectedFilePanel = document.querySelector("#selectedFile");
+const selectedFileType = document.querySelector("#selectedFileType");
 const selectedFileName = document.querySelector("#selectedFileName");
 const selectedFileSize = document.querySelector("#selectedFileSize");
 const removeFileButton = document.querySelector("#removeFileButton");
 const generateButton = document.querySelector("#generateButton");
+const generateButtonText = document.querySelector("#generateButtonText");
 const errorMessage = document.querySelector("#errorMessage");
 const errorText = document.querySelector("#errorText");
 const processingPanel = document.querySelector("#processingPanel");
@@ -18,18 +25,63 @@ const resultPanel = document.querySelector("#resultPanel");
 const audioPreview = document.querySelector("#audioPreview");
 const downloadButton = document.querySelector("#downloadButton");
 const newNarrationButton = document.querySelector("#newNarrationButton");
+const resultTitle = document.querySelector("#resultTitle");
+const footnoteText = document.querySelector("#footnoteText");
+
+const MODES = {
+  subtitle: {
+    endpoint: "/api/narrations",
+    fieldName: "subtitle",
+    extension: ".srt",
+    fileType: "SRT",
+    accept: ".srt,application/x-subrip,text/plain",
+    fileLegend: "Arquivo de legenda",
+    dropPrompt: "Arraste seu SRT aqui",
+    dropHint: "ou clique para procurar · somente .srt · até 5 MB",
+    help: "Mantém cada fala no timestamp definido pelo arquivo SRT.",
+    button: "Gerar narração sincronizada",
+    resultTitle: "Sua narração sincronizada está pronta",
+    downloadName: "narration_synchronized.mp3",
+    footnote: "Falas maiores que a legenda são preservadas e podem se sobrepor.",
+    messages: [
+      "Enviando e validando o SRT…",
+      "Gerando as falas em português…",
+      "Sincronizando cada timestamp…",
+      "Montando o arquivo MP3…",
+    ],
+  },
+  text: {
+    endpoint: "/api/text-narrations",
+    fieldName: "text",
+    extension: ".txt",
+    fileType: "TXT",
+    accept: ".txt,text/plain",
+    fileLegend: "Arquivo de texto",
+    dropPrompt: "Arraste seu TXT aqui",
+    dropHint: "ou clique para procurar · .txt de até 5 MB e 20.000 caracteres",
+    help: "Lê até 20.000 caracteres de forma contínua, respeitando parágrafos e pontuação.",
+    button: "Gerar narração contínua",
+    resultTitle: "Sua narração contínua está pronta",
+    downloadName: "narration_continuous.mp3",
+    footnote: "O texto é narrado de ponta a ponta, sem pausas definidas por timestamps.",
+    messages: [
+      "Enviando e validando o TXT…",
+      "Preparando o texto para leitura…",
+      "Gerando a narração em português…",
+      "Montando o arquivo MP3…",
+    ],
+  },
+};
 
 let selectedFile = null;
 let objectUrl = null;
 let timerId = null;
 let startedAt = 0;
 
-const processingMessages = [
-  "Enviando e validando o SRT…",
-  "Gerando as falas em português…",
-  "Sincronizando cada timestamp…",
-  "Montando o arquivo MP3…",
-];
+function getMode() {
+  const value = form.querySelector('input[name="narrationMode"]:checked')?.value;
+  return MODES[value] ?? MODES.subtitle;
+}
 
 function formatFileSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -66,7 +118,27 @@ function revokeResult() {
   }
 }
 
+function applyMode() {
+  const mode = getMode();
+  clearError();
+  revokeResult();
+  setSelectedFile(null);
+
+  fileInput.name = mode.fieldName;
+  fileInput.accept = mode.accept;
+  fileLegendText.textContent = mode.fileLegend;
+  dropPrompt.textContent = mode.dropPrompt;
+  dropHint.textContent = mode.dropHint;
+  modeHelp.textContent = mode.help;
+  selectedFileType.textContent = mode.fileType;
+  generateButtonText.textContent = mode.button;
+  resultTitle.textContent = mode.resultTitle;
+  downloadButton.download = mode.downloadName;
+  footnoteText.textContent = mode.footnote;
+}
+
 function setSelectedFile(file) {
+  const mode = getMode();
   clearError();
   revokeResult();
 
@@ -79,9 +151,9 @@ function setSelectedFile(file) {
     return;
   }
 
-  if (!file.name.toLowerCase().endsWith(".srt")) {
+  if (!file.name.toLowerCase().endsWith(mode.extension)) {
     setSelectedFile(null);
-    showError("Escolha um arquivo com a extensão .srt.");
+    showError(`Escolha um arquivo com a extensão ${mode.extension}.`);
     return;
   }
 
@@ -98,6 +170,7 @@ function setSelectedFile(file) {
   }
 
   selectedFile = file;
+  selectedFileType.textContent = mode.fileType;
   selectedFileName.textContent = file.name;
   selectedFileSize.textContent = `${formatFileSize(file.size)} · pronto para gerar`;
   dropZone.hidden = true;
@@ -106,6 +179,7 @@ function setSelectedFile(file) {
 }
 
 function setProcessing(active) {
+  const mode = getMode();
   form.setAttribute("aria-busy", String(active));
   generateButton.classList.toggle("is-loading", active);
   generateButton.disabled = active || !selectedFile;
@@ -114,6 +188,9 @@ function setProcessing(active) {
   fileInput.disabled = active;
   removeFileButton.disabled = active;
   document.querySelectorAll('input[name="voice"]').forEach((input) => {
+    input.disabled = active;
+  });
+  modeInputs.forEach((input) => {
     input.disabled = active;
   });
 
@@ -125,11 +202,11 @@ function setProcessing(active) {
 
   startedAt = Date.now();
   elapsedTime.textContent = "00:00";
-  processingStage.textContent = processingMessages[0];
+  processingStage.textContent = mode.messages[0];
   timerId = window.setInterval(() => {
     const seconds = Math.floor((Date.now() - startedAt) / 1000);
     elapsedTime.textContent = formatElapsed(seconds);
-    processingStage.textContent = processingMessages[Math.floor(seconds / 8) % processingMessages.length];
+    processingStage.textContent = mode.messages[Math.floor(seconds / 8) % mode.messages.length];
   }, 1000);
 }
 
@@ -145,6 +222,10 @@ async function getErrorMessage(response) {
   if (response.status === 429) return "Já existe outra narração em andamento.";
   return `Não foi possível gerar o áudio (erro ${response.status}).`;
 }
+
+modeInputs.forEach((input) => {
+  input.addEventListener("change", applyMode);
+});
 
 fileInput.addEventListener("change", () => {
   setSelectedFile(fileInput.files?.[0] ?? null);
@@ -179,9 +260,10 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   clearError();
   revokeResult();
+  const mode = getMode();
 
   if (!selectedFile) {
-    showError("Selecione um arquivo SRT antes de continuar.");
+    showError(`Selecione um arquivo ${mode.fileType} antes de continuar.`);
     return;
   }
 
@@ -192,12 +274,12 @@ form.addEventListener("submit", async (event) => {
   }
 
   const payload = new FormData();
-  payload.set("subtitle", selectedFile, selectedFile.name);
+  payload.set(mode.fieldName, selectedFile, selectedFile.name);
   payload.set("voice", voice);
   setProcessing(true);
 
   try {
-    const response = await fetch("/api/narrations", {
+    const response = await fetch(mode.endpoint, {
       method: "POST",
       body: payload,
       headers: { Accept: "audio/mpeg, application/json" },
@@ -211,6 +293,8 @@ form.addEventListener("submit", async (event) => {
     objectUrl = URL.createObjectURL(audioBlob);
     audioPreview.src = objectUrl;
     downloadButton.href = objectUrl;
+    downloadButton.download = mode.downloadName;
+    resultTitle.textContent = mode.resultTitle;
     resultPanel.hidden = false;
     resultPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
   } catch (error) {
@@ -231,3 +315,5 @@ newNarrationButton.addEventListener("click", () => {
 window.addEventListener("beforeunload", () => {
   if (objectUrl) URL.revokeObjectURL(objectUrl);
 });
+
+applyMode();

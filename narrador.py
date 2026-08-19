@@ -1,12 +1,14 @@
-"""Gera uma narração em MP3 sincronizada com os timestamps de um arquivo SRT."""
+"""Gera narrações MP3 sincronizadas por SRT ou contínuas a partir de TXT."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
 import os
+import re
 import shutil
 import sys
+import unicodedata
 from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -25,6 +27,7 @@ DEFAULT_INPUT = Path("input.srt")
 DEFAULT_OUTPUT = Path("narration_synchronized.mp3")
 DEFAULT_VOICE = "pt-BR-FranciscaNeural"
 SAMPLE_RATE = 24_000
+MAX_CONTINUOUS_TEXT_CHARACTERS = 20_000
 
 
 class NarrationError(RuntimeError):
@@ -43,6 +46,49 @@ def timedelta_to_milliseconds(value: timedelta) -> int:
 def normalize_text(content: str) -> str:
     """Transforma legendas multilinha em uma frase, preservando o conteúdo."""
     return " ".join(content.split())
+
+
+def normalize_continuous_text(content: str) -> str:
+    """Normaliza espaços sem remover pontuação, acentos ou parágrafos."""
+    content = unicodedata.normalize("NFC", content)
+    content = content.replace("\r\n", "\n").replace("\r", "\n")
+    paragraphs = re.split(r"\n[\t ]*\n+", content)
+    normalized_paragraphs = [
+        " ".join(paragraph.split()) for paragraph in paragraphs if paragraph.strip()
+    ]
+    return "\n\n".join(normalized_paragraphs)
+
+
+def load_continuous_text(input_path: Path) -> str:
+    """Lê um TXT UTF-8/BOM e preserva sua estrutura semântica para o TTS."""
+    if not input_path.is_file():
+        raise NarrationError(f"Arquivo de entrada não encontrado: {input_path}")
+
+    try:
+        source = input_path.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise NarrationError(
+            f"Não foi possível ler {input_path} como UTF-8: {exc}"
+        ) from exc
+    except OSError as exc:
+        raise NarrationError(f"Não foi possível ler {input_path}: {exc}") from exc
+
+    invalid_control = next(
+        (
+            character
+            for character in source
+            if unicodedata.category(character) == "Cc"
+            and character not in "\n\r\t"
+        ),
+        None,
+    )
+    if invalid_control is not None:
+        raise NarrationError("O arquivo TXT contém caracteres de controle inválidos.")
+
+    normalized = normalize_continuous_text(source)
+    if not normalized:
+        raise NarrationError("O arquivo TXT está vazio.")
+    return normalized
 
 
 def normalize_audio(audio: AudioSegment) -> AudioSegment:
@@ -187,6 +233,60 @@ def _exception_message(error: Exception | None) -> str:
     return message if message else type(error).__name__
 
 
+def export_mp3(timeline: AudioSegment, output_path: Path) -> None:
+    """Exporta um AudioSegment como MP3 por substituição atômica."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with TemporaryDirectory(
+            prefix=".narrador_export_", dir=output_path.parent
+        ) as export_directory:
+            temporary_output = Path(export_directory) / "narration.mp3"
+            exported_file = timeline.export(
+                str(temporary_output), format="mp3", bitrate="192k"
+            )
+            exported_file.close()
+            os.replace(temporary_output, output_path)
+    except OSError as exc:
+        raise NarrationError(f"Não foi possível salvar {output_path}: {exc}") from exc
+    except Exception as exc:
+        raise NarrationError(f"Falha ao exportar o MP3 com FFmpeg: {exc}") from exc
+
+
+async def build_text_narration(
+    input_path: Path,
+    output_path: Path,
+    voice: str = DEFAULT_VOICE,
+) -> None:
+    """Gera uma narração contínua a partir de um arquivo TXT."""
+    text = load_continuous_text(input_path)
+    if len(text) > MAX_CONTINUOUS_TEXT_CHARACTERS:
+        raise NarrationError(
+            "O texto ultrapassa o limite de 20.000 caracteres para uma geração."
+        )
+
+    if shutil.which("ffmpeg") is None:
+        raise NarrationError(
+            "FFmpeg não foi encontrado no PATH. Instale-o antes de gerar o MP3."
+        )
+
+    synthesizer = SpeechSynthesizer(voice)
+    with TemporaryDirectory(prefix="narrador_text_tts_") as temporary_directory:
+        workdir = Path(temporary_directory)
+        print("Gerando narração do texto corrido...")
+        try:
+            # Uma única chamada lógica mantém o mecanismo e a voz consistentes.
+            # edge-tts e gTTS fazem internamente a segmentação necessária.
+            speech = await synthesizer.synthesize(text, workdir, 1)
+        except NarrationError as exc:
+            raise NarrationError(f"Falha ao narrar o texto: {exc}") from exc
+
+    export_mp3(speech, output_path)
+    print(
+        f"Narração concluída: {output_path.resolve()} "
+        f"({len(speech) / 1000:.3f} s)"
+    )
+
+
 async def build_narration(
     input_path: Path,
     output_path: Path,
@@ -238,22 +338,7 @@ async def build_narration(
     if spoken_count == 0 and len(timeline) == 0:
         raise NarrationError("O arquivo SRT não contém texto nem duração de áudio.")
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        # A publicação atômica evita deixar uma saída parcial se o FFmpeg falhar.
-        with TemporaryDirectory(
-            prefix=".narrador_export_", dir=output_path.parent
-        ) as export_directory:
-            temporary_output = Path(export_directory) / "narration.mp3"
-            exported_file = timeline.export(
-                str(temporary_output), format="mp3", bitrate="192k"
-            )
-            exported_file.close()
-            os.replace(temporary_output, output_path)
-    except OSError as exc:
-        raise NarrationError(f"Não foi possível salvar {output_path}: {exc}") from exc
-    except Exception as exc:
-        raise NarrationError(f"Falha ao exportar o MP3 com FFmpeg: {exc}") from exc
+    export_mp3(timeline, output_path)
 
     print(
         f"Narração concluída: {output_path.resolve()} "

@@ -1,15 +1,20 @@
-# Narrador sincronizado
+# Narrador — SRT sincronizado e texto corrido
 
-Interface web local que transforma legendas SRT em uma narração brasileira
-sincronizada e exporta o resultado como `narration_synchronized.mp3`.
+Interface web que transforma legendas SRT em uma narração brasileira
+sincronizada ou converte texto corrido em uma leitura contínua. O modo SRT
+respeita os timestamps de cada legenda; o modo texto segue a pontuação e a
+entonação natural da voz selecionada.
 
 ## Uso rápido no Windows
 
 1. Confirme que o Python e o FFmpeg estão instalados e disponíveis no `PATH`.
 2. Dê dois cliques em `iniciar.bat`.
-3. No navegador, escolha ou arraste um arquivo `.srt`, selecione a voz e clique
-   em **Gerar narração**.
+3. No navegador, escolha o modo **SRT sincronizado** ou **Texto corrido**, envie
+   um arquivo `.srt` ou `.txt`, selecione a voz e clique em **Gerar narração**.
 4. Ouça a prévia e baixe o MP3.
+
+O modo SRT baixa `narration_synchronized.mp3`; o modo texto corrido baixa
+`narration_continuous.mp3`.
 
 Na primeira execução, o inicializador cria o ambiente virtual e instala as
 dependências automaticamente. A síntese de voz requer acesso à internet.
@@ -63,14 +68,13 @@ acesso externo caso ele não deva ficar disponível ao público.
 
 ## Limites da interface
 
-- Arquivo SRT de até 5 MB.
-- Linha do tempo de até 3 horas.
-- Até 10.000 blocos e 300.000 caracteres falados.
+- Arquivo SRT ou TXT de até 5 MB, codificado em UTF-8.
+- No modo SRT, linha do tempo de até 3 horas e até 10.000 blocos.
+- Até 300.000 caracteres falados no modo SRT e 20.000 no modo texto corrido.
 - Uma geração por vez no servidor local.
 
-O arquivo é processado localmente, mas o texto das falas é enviado ao serviço
-online do Microsoft Edge TTS. Se ele falhar, o Google TTS é utilizado como
-alternativa.
+Os arquivos são temporários, mas o texto das falas é enviado ao serviço online
+do Microsoft Edge TTS. Se ele falhar, o Google TTS é utilizado como alternativa.
 
 ## Linha de comando
 

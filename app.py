@@ -1,4 +1,4 @@
-"""Interface web local para gerar narrações sincronizadas a partir de SRT."""
+"""Interface web local para gerar narrações a partir de arquivos SRT ou TXT."""
 
 from __future__ import annotations
 
@@ -17,12 +17,14 @@ import narrador
 from narrador import NarrationError
 
 
-# Um SRT comum tem poucos quilobytes. O limite evita manter uploads arbitrariamente
+# Arquivos de texto comuns têm poucos quilobytes. O limite evita manter uploads
 # grandes em memória; a margem adicional cobre os metadados do multipart/form-data.
 MAX_SUBTITLE_BYTES = 5 * 1024 * 1024
-MAX_REQUEST_BYTES = MAX_SUBTITLE_BYTES + 1024 * 1024
+MAX_TEXT_BYTES = 5 * 1024 * 1024
+MAX_REQUEST_BYTES = max(MAX_SUBTITLE_BYTES, MAX_TEXT_BYTES) + 1024 * 1024
 MAX_SUBTITLE_BLOCKS = 10_000
 MAX_SPOKEN_CHARACTERS = 300_000
+MAX_TEXT_CHARACTERS = narrador.MAX_CONTINUOUS_TEXT_CHARACTERS
 MAX_TIMELINE_MS = 3 * 60 * 60 * 1_000
 
 # Somente vozes brasileiras conhecidas pelo edge-tts podem chegar ao sintetizador.
@@ -59,7 +61,7 @@ def _narration_error_status(error: NarrationError) -> int:
 
 @app.get("/")
 def index():
-    """Exibe a interface de envio do arquivo SRT."""
+    """Exibe a interface de geração de narrações."""
     return render_template("index.html")
 
 
@@ -171,6 +173,100 @@ def create_narration():
         mimetype="audio/mpeg",
         as_attachment=True,
         download_name="narration_synchronized.mp3",
+        max_age=0,
+    )
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+@app.post("/api/text-narrations")
+def create_text_narration():
+    """Gera um MP3 contínuo a partir de um arquivo TXT em UTF-8."""
+    text_file = request.files.get("text")
+    if text_file is None:
+        return _error("Envie um arquivo no campo 'text'.", 400)
+
+    if not text_file.filename:
+        return _error("Selecione um arquivo TXT.", 400)
+
+    if Path(text_file.filename).suffix.casefold() != ".txt":
+        return _error("O arquivo deve ter a extensão .txt.", 415)
+
+    voice = request.form.get("voice", "").strip()
+    if not voice:
+        return _error("Selecione uma voz.", 400)
+    if voice not in ALLOWED_VOICES:
+        return _error("A voz selecionada não é permitida.", 400)
+
+    try:
+        text_data = text_file.stream.read(MAX_TEXT_BYTES + 1)
+    except (OSError, ValueError):
+        return _error("Não foi possível ler o arquivo enviado.", 400)
+    if len(text_data) > MAX_TEXT_BYTES:
+        return _error("O arquivo TXT excede o limite de 5 MB.", 413)
+    if not text_data.strip():
+        return _error("O arquivo TXT está vazio.", 400)
+
+    try:
+        with TemporaryDirectory(prefix="narrador_text_web_") as temporary_directory:
+            workdir = Path(temporary_directory)
+            input_path = workdir / "input.txt"
+            output_path = workdir / "narration_continuous.mp3"
+            input_path.write_bytes(text_data)
+
+            normalized_text = narrador.load_continuous_text(input_path)
+            if len(normalized_text) > MAX_TEXT_CHARACTERS:
+                return _error(
+                    "O texto ultrapassa o limite de 20.000 caracteres para uma geração.",
+                    422,
+                )
+
+            if not generation_slot.acquire(blocking=False):
+                response = jsonify(
+                    error="Já existe uma narração sendo gerada. Tente novamente em instantes."
+                )
+                response.status_code = 429
+                response.headers["Retry-After"] = "5"
+                return response
+
+            try:
+                asyncio.run(
+                    narrador.build_text_narration(input_path, output_path, voice)
+                )
+                mp3_data = output_path.read_bytes()
+            finally:
+                generation_slot.release()
+
+        if not mp3_data:
+            app.logger.error("O gerador de texto concluiu sem produzir conteúdo MP3.")
+            return _error("Não foi possível gerar o arquivo de áudio.", 500)
+
+    except NarrationError as error:
+        status = _narration_error_status(error)
+        if status >= 500:
+            app.logger.error("Falha ao gerar narração de texto: %s", error)
+            public_messages = {
+                500: "Não foi possível concluir a geração do MP3.",
+                502: "O serviço de voz está indisponível no momento.",
+                503: "O FFmpeg não está disponível neste computador.",
+            }
+            return _error(public_messages.get(status, "Falha interna na geração."), status)
+        return _error(str(error), status)
+    except OSError as error:
+        app.logger.error(
+            "Falha de sistema de arquivos durante a geração de texto: %s", error
+        )
+        return _error("Não foi possível processar o arquivo enviado.", 500)
+    except Exception:
+        app.logger.exception("Erro inesperado durante a geração de texto.")
+        return _error("Ocorreu um erro inesperado ao gerar a narração.", 500)
+
+    response = send_file(
+        BytesIO(mp3_data),
+        mimetype="audio/mpeg",
+        as_attachment=True,
+        download_name="narration_continuous.mp3",
         max_age=0,
     )
     response.headers["Cache-Control"] = "no-store, max-age=0"
