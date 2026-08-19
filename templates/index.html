@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Gere uma narração em português sincronizada com suas legendas SRT.">
+    <meta name="theme-color" content="#17352f">
+    <title>Narrador — SRT para voz sincronizada</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script defer src="{{ url_for('static', filename='app.js') }}"></script>
+  </head>
+  <body>
+    <div class="page-glow page-glow--one" aria-hidden="true"></div>
+    <div class="page-glow page-glow--two" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Narrador — página inicial">
+        <span class="brand__mark" aria-hidden="true">
+          <svg viewBox="0 0 40 40" role="img">
+            <path d="M8 23h4l3-11 5 20 4-16 3 7h5" />
+          </svg>
+        </span>
+        <span class="brand__copy">
+          <strong>Narrador</strong>
+          <small>legenda em voz</small>
+        </span>
+      </a>
+
+      <div class="local-badge" title="O aplicativo está rodando no seu computador">
+        <span class="local-badge__dot" aria-hidden="true"></span>
+        Aplicativo local
+      </div>
+    </header>
+
+    <main class="main-layout">
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow"><span>01</span> SRT para áudio</p>
+        <h1 id="page-title">Dê voz às suas <em>legendas.</em></h1>
+        <p class="intro__lead">
+          Transforme cada fala em narração brasileira e mantenha o início
+          exatamente no tempo marcado pelo arquivo.
+        </p>
+
+        <ol class="how-it-works" aria-label="Como funciona">
+          <li>
+            <span class="how-it-works__number">01</span>
+            <span><strong>Escolha o SRT</strong><small>Envie sua legenda de até 5 MB</small></span>
+          </li>
+          <li>
+            <span class="how-it-works__number">02</span>
+            <span><strong>Defina a voz</strong><small>Três vozes brasileiras naturais</small></span>
+          </li>
+          <li>
+            <span class="how-it-works__number">03</span>
+            <span><strong>Baixe o MP3</strong><small>Pronto para editar ou publicar</small></span>
+          </li>
+        </ol>
+
+        <div class="privacy-note">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3 5 6v5c0 4.5 2.8 8.6 7 10 4.2-1.4 7-5.5 7-10V6l-7-3Z" />
+            <path d="m9.5 12 1.7 1.7 3.7-4" />
+          </svg>
+          <p>
+            O processamento do arquivo acontece localmente. Para criar a voz,
+            o texto é enviado ao Microsoft Edge TTS e, se necessário, ao Google TTS.
+          </p>
+        </div>
+      </section>
+
+      <section class="generator-card" aria-labelledby="generator-title">
+        <div class="generator-card__header">
+          <div>
+            <p class="section-kicker">Nova narração</p>
+            <h2 id="generator-title">Prepare seu áudio</h2>
+          </div>
+          <span class="format-pill">MP3 · 192 kbps</span>
+        </div>
+
+        <form id="narrationForm" enctype="multipart/form-data" novalidate>
+          <fieldset class="form-section">
+            <legend><span>1</span> Arquivo de legenda</legend>
+
+            <label class="drop-zone" id="dropZone" for="subtitleInput">
+              <input
+                id="subtitleInput"
+                name="subtitle"
+                type="file"
+                accept=".srt,application/x-subrip,text/plain"
+                required
+              >
+              <span class="drop-zone__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5" />
+                  <path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" />
+                </svg>
+              </span>
+              <span class="drop-zone__text">
+                <strong>Arraste seu arquivo aqui</strong>
+                <small>ou clique para procurar · somente .srt</small>
+              </span>
+            </label>
+
+            <div class="selected-file" id="selectedFile" hidden>
+              <span class="selected-file__type" aria-hidden="true">SRT</span>
+              <span class="selected-file__info">
+                <strong id="selectedFileName"></strong>
+                <small id="selectedFileSize"></small>
+              </span>
+              <button class="icon-button" id="removeFileButton" type="button" aria-label="Remover arquivo">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="m7 7 10 10M17 7 7 17" />
+                </svg>
+              </button>
+            </div>
+          </fieldset>
+
+          <fieldset class="form-section voice-section">
+            <legend><span>2</span> Escolha a voz</legend>
+            <div class="voice-grid">
+              <label class="voice-option">
+                <input type="radio" name="voice" value="pt-BR-FranciscaNeural" checked>
+                <span class="voice-option__avatar voice-option__avatar--coral" aria-hidden="true">F</span>
+                <span class="voice-option__copy"><strong>Francisca</strong><small>Feminina · calorosa</small></span>
+                <span class="voice-option__check" aria-hidden="true">
+                  <svg viewBox="0 0 16 16"><path d="m3 8 3 3 7-7" /></svg>
+                </span>
+              </label>
+
+              <label class="voice-option">
+                <input type="radio" name="voice" value="pt-BR-AntonioNeural">
+                <span class="voice-option__avatar voice-option__avatar--green" aria-hidden="true">A</span>
+                <span class="voice-option__copy"><strong>Antonio</strong><small>Masculina · amigável</small></span>
+                <span class="voice-option__check" aria-hidden="true">
+                  <svg viewBox="0 0 16 16"><path d="m3 8 3 3 7-7" /></svg>
+                </span>
+              </label>
+
+              <label class="voice-option">
+                <input type="radio" name="voice" value="pt-BR-ThalitaMultilingualNeural">
+                <span class="voice-option__avatar voice-option__avatar--blue" aria-hidden="true">T</span>
+                <span class="voice-option__copy"><strong>Thalita</strong><small>Feminina · versátil</small></span>
+                <span class="voice-option__check" aria-hidden="true">
+                  <svg viewBox="0 0 16 16"><path d="m3 8 3 3 7-7" /></svg>
+                </span>
+              </label>
+            </div>
+          </fieldset>
+
+          <div class="message message--error" id="errorMessage" role="alert" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 8v5m0 3h.01" />
+              <path d="M10.3 4.4 2.7 18a2 2 0 0 0 1.8 3h15a2 2 0 0 0 1.8-3L13.7 4.4a2 2 0 0 0-3.4 0Z" />
+            </svg>
+            <span id="errorText"></span>
+          </div>
+
+          <button class="generate-button" id="generateButton" type="submit" disabled>
+            <span class="generate-button__label">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 12h14m-5-5 5 5-5 5" />
+              </svg>
+              Gerar narração
+            </span>
+            <span class="generate-button__loading" aria-hidden="true">
+              <span class="spinner"></span>
+              Gerando áudio…
+            </span>
+          </button>
+        </form>
+
+        <div class="processing-panel" id="processingPanel" role="status" aria-live="polite" hidden>
+          <div class="processing-panel__top">
+            <span class="processing-panel__pulse" aria-hidden="true"></span>
+            <div><strong id="processingStage">Enviando e validando o SRT…</strong><small>Não feche esta página</small></div>
+            <time id="elapsedTime">00:00</time>
+          </div>
+          <div class="progress-track" aria-hidden="true"><span></span></div>
+        </div>
+
+        <div class="result-panel" id="resultPanel" aria-live="polite" hidden>
+          <div class="result-panel__heading">
+            <span class="success-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg>
+            </span>
+            <div><p>Áudio finalizado</p><h3>Sua narração está pronta</h3></div>
+          </div>
+
+          <div class="audio-preview">
+            <div class="waveform" aria-hidden="true">
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </div>
+            <audio id="audioPreview" controls preload="metadata"></audio>
+          </div>
+
+          <div class="result-panel__actions">
+            <a class="download-button" id="downloadButton" download="narration_synchronized.mp3">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14" />
+              </svg>
+              Baixar MP3
+            </a>
+            <button class="secondary-button" id="newNarrationButton" type="button">Gerar outro</button>
+          </div>
+        </div>
+
+        <p class="generator-card__footnote">
+          Falas maiores que a legenda são preservadas e podem se sobrepor.
+        </p>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>Narrador local</span>
+      <span aria-hidden="true">•</span>
+      <span>Sincronização baseada nos timestamps do SRT</span>
+    </footer>
+
+    <noscript>
+      <div class="noscript-message">Ative o JavaScript no navegador para usar o gerador.</div>
+    </noscript>
+  </body>
+</html>

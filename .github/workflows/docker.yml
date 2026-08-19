@@ -1,0 +1,22 @@
+name: Validate Docker deployment
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Validate Compose
+        run: docker compose --file docker-compose.yaml config --quiet
+
+      - name: Build application image
+        run: docker build --tag narrador:test .
