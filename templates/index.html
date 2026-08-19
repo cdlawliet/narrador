@@ -62,8 +62,8 @@
             <path d="m9.5 12 1.7 1.7 3.7-4" />
           </svg>
           <p>
-            O processamento do arquivo acontece localmente. Para criar a voz,
-            o texto é enviado ao Microsoft Edge TTS e, se necessário, ao Google TTS.
+            O aplicativo não armazena o conteúdo após a geração. Para criar a
+            voz, ele é enviado ao Microsoft Edge TTS e, se necessário, ao Google TTS.
           </p>
         </div>
       </section>
@@ -105,7 +105,7 @@
                 </span>
                 <span class="mode-option__copy">
                   <strong>Texto corrido</strong>
-                  <small>Arquivo .txt</small>
+                  <small>Arquivo .txt ou texto digitado</small>
                 </span>
                 <span class="mode-option__check" aria-hidden="true"></span>
               </label>
@@ -115,46 +115,84 @@
             </p>
           </fieldset>
 
-          <fieldset class="form-section">
-            <legend><span>2</span> <span class="legend-label" id="fileLegendText">Arquivo de legenda</span></legend>
+          <fieldset class="form-section source-section" id="textSourceSection" hidden>
+            <legend><span>2</span> Como quer adicionar o texto?</legend>
+            <div class="source-switch">
+              <label class="source-option">
+                <input type="radio" name="textSource" value="file">
+                <span>
+                  <strong>Enviar TXT</strong>
+                  <small>Selecione um arquivo do computador</small>
+                </span>
+              </label>
+              <label class="source-option">
+                <input type="radio" name="textSource" value="content" checked>
+                <span>
+                  <strong>Colar ou digitar</strong>
+                  <small>Escreva o conteúdo diretamente aqui</small>
+                </span>
+              </label>
+            </div>
+          </fieldset>
 
-            <label class="drop-zone" id="dropZone" for="subtitleInput">
-              <input
-                id="subtitleInput"
-                name="subtitle"
-                type="file"
-                accept=".srt,application/x-subrip,text/plain"
-                aria-describedby="modeHelp"
-                required
-              >
-              <span class="drop-zone__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24">
-                  <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5" />
-                  <path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" />
-                </svg>
-              </span>
-              <span class="drop-zone__text">
-                <strong id="dropPrompt">Arraste seu SRT aqui</strong>
-                <small id="dropHint">ou clique para procurar · somente .srt · até 5 MB</small>
-              </span>
-            </label>
+          <fieldset class="form-section" id="inputSection">
+            <legend><span id="inputStepNumber">2</span> <span class="legend-label" id="fileLegendText">Arquivo de legenda</span></legend>
 
-            <div class="selected-file" id="selectedFile" aria-live="polite" hidden>
-              <span class="selected-file__type" id="selectedFileType" aria-hidden="true">SRT</span>
-              <span class="selected-file__info">
-                <strong id="selectedFileName"></strong>
-                <small id="selectedFileSize"></small>
-              </span>
-              <button class="icon-button" id="removeFileButton" type="button" aria-label="Remover arquivo">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="m7 7 10 10M17 7 7 17" />
-                </svg>
-              </button>
+            <div id="fileUploadPanel">
+              <label class="drop-zone" id="dropZone" for="subtitleInput">
+                <input
+                  id="subtitleInput"
+                  name="subtitle"
+                  type="file"
+                  accept=".srt,application/x-subrip,text/plain"
+                  aria-describedby="modeHelp"
+                  required
+                >
+                <span class="drop-zone__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5" />
+                    <path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" />
+                  </svg>
+                </span>
+                <span class="drop-zone__text">
+                  <strong id="dropPrompt">Arraste seu SRT aqui</strong>
+                  <small id="dropHint">ou clique para procurar · somente .srt · até 5 MB</small>
+                </span>
+              </label>
+
+              <div class="selected-file" id="selectedFile" aria-live="polite" hidden>
+                <span class="selected-file__type" id="selectedFileType" aria-hidden="true">SRT</span>
+                <span class="selected-file__info">
+                  <strong id="selectedFileName"></strong>
+                  <small id="selectedFileSize"></small>
+                </span>
+                <button class="icon-button" id="removeFileButton" type="button" aria-label="Remover arquivo">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m7 7 10 10M17 7 7 17" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="text-entry" id="textEntryPanel" hidden>
+              <label class="text-entry__label" for="textContent">Texto da narração</label>
+              <textarea
+                id="textContent"
+                name="content"
+                rows="8"
+                placeholder="Cole ou digite aqui o texto que deseja transformar em voz…"
+                aria-describedby="textEntryHelp textCounter textLimitMessage"
+              ></textarea>
+              <div class="text-entry__meta">
+                <small id="textEntryHelp">Contamos o texto após normalizar espaços e parágrafos.</small>
+                <output id="textCounter" for="textContent">0 / 20.000</output>
+              </div>
+              <small class="text-entry__limit" id="textLimitMessage" role="status" hidden></small>
             </div>
           </fieldset>
 
           <fieldset class="form-section voice-section">
-            <legend><span>3</span> Escolha a voz</legend>
+            <legend><span id="voiceStepNumber">3</span> Escolha a voz</legend>
             <div class="voice-grid">
               <label class="voice-option">
                 <input type="radio" name="voice" value="pt-BR-FranciscaNeural" checked>

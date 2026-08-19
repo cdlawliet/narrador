@@ -1,8 +1,18 @@
 "use strict";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
+const MAX_TEXT_CHARACTERS = 20_000;
 const form = document.querySelector("#narrationForm");
 const modeInputs = document.querySelectorAll('input[name="narrationMode"]');
+const textSourceInputs = document.querySelectorAll('input[name="textSource"]');
+const textSourceSection = document.querySelector("#textSourceSection");
+const inputStepNumber = document.querySelector("#inputStepNumber");
+const voiceStepNumber = document.querySelector("#voiceStepNumber");
+const fileUploadPanel = document.querySelector("#fileUploadPanel");
+const textEntryPanel = document.querySelector("#textEntryPanel");
+const textContent = document.querySelector("#textContent");
+const textCounter = document.querySelector("#textCounter");
+const textLimitMessage = document.querySelector("#textLimitMessage");
 const fileInput = document.querySelector("#subtitleInput");
 const dropZone = document.querySelector("#dropZone");
 const modeHelp = document.querySelector("#modeHelp");
@@ -77,10 +87,60 @@ let selectedFile = null;
 let objectUrl = null;
 let timerId = null;
 let startedAt = 0;
+let isProcessing = false;
 
 function getMode() {
   const value = form.querySelector('input[name="narrationMode"]:checked')?.value;
   return MODES[value] ?? MODES.subtitle;
+}
+
+function isTextMode() {
+  return form.querySelector('input[name="narrationMode"]:checked')?.value === "text";
+}
+
+function getTextSource() {
+  return form.querySelector('input[name="textSource"]:checked')?.value ?? "content";
+}
+
+function normalizeContinuousText(value) {
+  const normalizedLineEndings = value.normalize("NFC").replace(/\r\n?/gu, "\n");
+  const paragraphs = normalizedLineEndings.split(/\n[\t ]*\n+/gu);
+  return paragraphs
+    .map((paragraph) => paragraph.trim().split(/\s+/gu).filter(Boolean).join(" "))
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function getNormalizedTextLength() {
+  return Array.from(normalizeContinuousText(textContent.value)).length;
+}
+
+function hasValidInput() {
+  if (!isTextMode() || getTextSource() === "file") return Boolean(selectedFile);
+  const count = getNormalizedTextLength();
+  return count > 0 && count <= MAX_TEXT_CHARACTERS;
+}
+
+function updateGenerateButton() {
+  generateButton.disabled = isProcessing || !hasValidInput();
+}
+
+function updateTextCounter() {
+  const count = getNormalizedTextLength();
+  const excess = count - MAX_TEXT_CHARACTERS;
+  textCounter.textContent = `${count.toLocaleString("pt-BR")} / 20.000`;
+  textCounter.classList.toggle("is-near-limit", count >= MAX_TEXT_CHARACTERS * 0.9);
+  textContent.setAttribute("aria-invalid", String(excess > 0));
+  textLimitMessage.hidden = excess <= 0;
+  textLimitMessage.textContent = excess > 0
+    ? `Reduza o texto em ${excess.toLocaleString("pt-BR")} ${excess === 1 ? "caractere" : "caracteres"} para continuar.`
+    : "";
+}
+
+function clearTextContent() {
+  textContent.value = "";
+  updateTextCounter();
+  updateGenerateButton();
 }
 
 function formatFileSize(bytes) {
@@ -126,7 +186,6 @@ function applyMode() {
 
   fileInput.name = mode.fieldName;
   fileInput.accept = mode.accept;
-  fileLegendText.textContent = mode.fileLegend;
   dropPrompt.textContent = mode.dropPrompt;
   dropHint.textContent = mode.dropHint;
   modeHelp.textContent = mode.help;
@@ -135,6 +194,26 @@ function applyMode() {
   resultTitle.textContent = mode.resultTitle;
   downloadButton.download = mode.downloadName;
   footnoteText.textContent = mode.footnote;
+
+  textSourceSection.hidden = !isTextMode();
+  inputStepNumber.textContent = isTextMode() ? "3" : "2";
+  voiceStepNumber.textContent = isTextMode() ? "4" : "3";
+  applyTextSource();
+}
+
+function applyTextSource() {
+  const useContent = isTextMode() && getTextSource() === "content";
+  clearError();
+  revokeResult();
+
+  fileUploadPanel.hidden = useContent;
+  textEntryPanel.hidden = !useContent;
+  fileLegendText.textContent = useContent ? "Texto da narração" : getMode().fileLegend;
+  fileInput.required = !useContent;
+  textContent.required = useContent;
+  fileInput.disabled = isProcessing || useContent;
+  textContent.disabled = isProcessing || !useContent;
+  updateGenerateButton();
 }
 
 function setSelectedFile(file) {
@@ -147,7 +226,7 @@ function setSelectedFile(file) {
     fileInput.value = "";
     selectedFilePanel.hidden = true;
     dropZone.hidden = false;
-    generateButton.disabled = true;
+    updateGenerateButton();
     return;
   }
 
@@ -175,22 +254,36 @@ function setSelectedFile(file) {
   selectedFileSize.textContent = `${formatFileSize(file.size)} · pronto para gerar`;
   dropZone.hidden = true;
   selectedFilePanel.hidden = false;
-  generateButton.disabled = false;
+  updateGenerateButton();
 }
 
 function setProcessing(active) {
   const mode = getMode();
+  const useContent = isTextMode() && getTextSource() === "content";
+  const processingMessages = useContent
+    ? [
+        "Enviando e validando o texto…",
+        "Preparando parágrafos e pontuação…",
+        "Gerando a narração em português…",
+        "Montando o arquivo MP3…",
+      ]
+    : mode.messages;
+  isProcessing = active;
   form.setAttribute("aria-busy", String(active));
   generateButton.classList.toggle("is-loading", active);
-  generateButton.disabled = active || !selectedFile;
+  updateGenerateButton();
   processingPanel.hidden = !active;
 
-  fileInput.disabled = active;
+  fileInput.disabled = active || useContent;
+  textContent.disabled = active || !useContent;
   removeFileButton.disabled = active;
   document.querySelectorAll('input[name="voice"]').forEach((input) => {
     input.disabled = active;
   });
   modeInputs.forEach((input) => {
+    input.disabled = active;
+  });
+  textSourceInputs.forEach((input) => {
     input.disabled = active;
   });
 
@@ -202,11 +295,11 @@ function setProcessing(active) {
 
   startedAt = Date.now();
   elapsedTime.textContent = "00:00";
-  processingStage.textContent = mode.messages[0];
+  processingStage.textContent = processingMessages[0];
   timerId = window.setInterval(() => {
     const seconds = Math.floor((Date.now() - startedAt) / 1000);
     elapsedTime.textContent = formatElapsed(seconds);
-    processingStage.textContent = mode.messages[Math.floor(seconds / 8) % mode.messages.length];
+    processingStage.textContent = processingMessages[Math.floor(seconds / 8) % processingMessages.length];
   }, 1000);
 }
 
@@ -218,13 +311,28 @@ async function getErrorMessage(response) {
     // A resposta pode não ser JSON se o servidor for interrompido.
   }
 
-  if (response.status === 413) return "O arquivo ultrapassa o limite permitido.";
+  if (response.status === 413) {
+    return isTextMode() && getTextSource() === "content"
+      ? "O texto ultrapassa o limite permitido."
+      : "O arquivo ultrapassa o limite permitido.";
+  }
   if (response.status === 429) return "Já existe outra narração em andamento.";
   return `Não foi possível gerar o áudio (erro ${response.status}).`;
 }
 
 modeInputs.forEach((input) => {
   input.addEventListener("change", applyMode);
+});
+
+textSourceInputs.forEach((input) => {
+  input.addEventListener("change", applyTextSource);
+});
+
+textContent.addEventListener("input", () => {
+  clearError();
+  revokeResult();
+  updateTextCounter();
+  updateGenerateButton();
 });
 
 fileInput.addEventListener("change", () => {
@@ -261,8 +369,21 @@ form.addEventListener("submit", async (event) => {
   clearError();
   revokeResult();
   const mode = getMode();
+  const useContent = isTextMode() && getTextSource() === "content";
 
-  if (!selectedFile) {
+  if (useContent) {
+    const normalizedLength = getNormalizedTextLength();
+    if (normalizedLength === 0) {
+      showError("Digite ou cole um texto antes de continuar.");
+      textContent.focus();
+      return;
+    }
+    if (normalizedLength > MAX_TEXT_CHARACTERS) {
+      showError("Reduza o texto para no máximo 20.000 caracteres.");
+      textContent.focus();
+      return;
+    }
+  } else if (!selectedFile) {
     showError(`Selecione um arquivo ${mode.fileType} antes de continuar.`);
     return;
   }
@@ -274,7 +395,8 @@ form.addEventListener("submit", async (event) => {
   }
 
   const payload = new FormData();
-  payload.set(mode.fieldName, selectedFile, selectedFile.name);
+  if (useContent) payload.set("content", textContent.value);
+  else payload.set(mode.fieldName, selectedFile, selectedFile.name);
   payload.set("voice", voice);
   setProcessing(true);
 
@@ -308,12 +430,19 @@ form.addEventListener("submit", async (event) => {
 newNarrationButton.addEventListener("click", () => {
   clearError();
   revokeResult();
-  setSelectedFile(null);
-  window.scrollTo({ top: 0, behavior: "smooth" });
+
+  if (isTextMode() && getTextSource() === "content") {
+    clearTextContent();
+    textContent.focus();
+  } else {
+    setSelectedFile(null);
+    fileInput.focus();
+  }
 });
 
 window.addEventListener("beforeunload", () => {
   if (objectUrl) URL.revokeObjectURL(objectUrl);
 });
 
+updateTextCounter();
 applyMode();

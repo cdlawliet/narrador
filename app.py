@@ -46,6 +46,73 @@ def _error(message: str, status: int):
     return jsonify(error=message), status
 
 
+def _continuous_text_request_content() -> tuple[str | None, tuple[str, int] | None]:
+    """Seleciona e normaliza exatamente uma fonte de texto do multipart."""
+    text_files = request.files.getlist("text")
+    direct_contents = request.form.getlist("content")
+    if len(text_files) > 1:
+        return None, ("Envie somente uma parte de arquivo no campo 'text'.", 400)
+    if len(direct_contents) > 1:
+        return None, ("Envie somente um campo 'content'.", 400)
+
+    text_file = text_files[0] if text_files else None
+    file_selected = text_file is not None and bool(text_file.filename)
+    file_data = b""
+
+    if file_selected:
+        try:
+            file_data = text_file.stream.read(MAX_TEXT_BYTES + 1)
+        except (OSError, ValueError):
+            return None, ("Não foi possível ler o arquivo enviado.", 400)
+        if len(file_data) > MAX_TEXT_BYTES:
+            return None, ("O arquivo TXT excede o limite de 5 MB.", 413)
+
+    direct_content = direct_contents[0] if direct_contents else None
+
+    file_is_useful = file_selected and bool(file_data.strip())
+    direct_is_useful = direct_content is not None and bool(direct_content.strip())
+
+    if file_is_useful and direct_is_useful:
+        return None, ("Envie um arquivo TXT ou informe o texto, não ambos.", 400)
+
+    if not file_is_useful and not direct_is_useful:
+        if file_selected:
+            return None, ("O arquivo TXT está vazio.", 400)
+        if direct_content is not None:
+            return None, ("O texto digitado está vazio.", 400)
+        return None, ("Envie um arquivo no campo 'text' ou informe o campo 'content'.", 400)
+
+    if direct_is_useful:
+        try:
+            direct_data = direct_content.encode("utf-8")
+        except UnicodeEncodeError:
+            return None, ("O texto digitado não pôde ser interpretado como UTF-8.", 422)
+        if len(direct_data) > MAX_TEXT_BYTES:
+            return None, ("O texto digitado excede o limite de 5 MB.", 413)
+        source_content = direct_content
+
+    else:
+        # A extensão e o tamanho só importam quando o arquivo é a fonte escolhida.
+        assert text_file is not None
+        if Path(text_file.filename).suffix.casefold() != ".txt":
+            return None, ("O arquivo deve ter a extensão .txt.", 415)
+        try:
+            source_content = file_data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            return None, ("O arquivo TXT deve usar codificação UTF-8.", 422)
+
+    try:
+        normalized_content = narrador.validate_continuous_text(source_content)
+    except NarrationError as error:
+        return None, (str(error), 422)
+    if len(normalized_content) > MAX_TEXT_CHARACTERS:
+        return None, (
+            "O texto ultrapassa o limite de 20.000 caracteres para uma geração.",
+            422,
+        )
+    return normalized_content, None
+
+
 def _narration_error_status(error: NarrationError) -> int:
     """Distingue entrada inválida de falhas locais ou de serviços de voz."""
     message = str(error).casefold()
@@ -182,16 +249,11 @@ def create_narration():
 
 @app.post("/api/text-narrations")
 def create_text_narration():
-    """Gera um MP3 contínuo a partir de um arquivo TXT em UTF-8."""
-    text_file = request.files.get("text")
-    if text_file is None:
-        return _error("Envie um arquivo no campo 'text'.", 400)
-
-    if not text_file.filename:
-        return _error("Selecione um arquivo TXT.", 400)
-
-    if Path(text_file.filename).suffix.casefold() != ".txt":
-        return _error("O arquivo deve ter a extensão .txt.", 415)
+    """Gera um MP3 contínuo a partir de arquivo TXT ou texto digitado."""
+    normalized_text, source_error = _continuous_text_request_content()
+    if source_error is not None:
+        return _error(*source_error)
+    assert normalized_text is not None
 
     voice = request.form.get("voice", "").strip()
     if not voice:
@@ -200,27 +262,11 @@ def create_text_narration():
         return _error("A voz selecionada não é permitida.", 400)
 
     try:
-        text_data = text_file.stream.read(MAX_TEXT_BYTES + 1)
-    except (OSError, ValueError):
-        return _error("Não foi possível ler o arquivo enviado.", 400)
-    if len(text_data) > MAX_TEXT_BYTES:
-        return _error("O arquivo TXT excede o limite de 5 MB.", 413)
-    if not text_data.strip():
-        return _error("O arquivo TXT está vazio.", 400)
-
-    try:
         with TemporaryDirectory(prefix="narrador_text_web_") as temporary_directory:
             workdir = Path(temporary_directory)
             input_path = workdir / "input.txt"
             output_path = workdir / "narration_continuous.mp3"
-            input_path.write_bytes(text_data)
-
-            normalized_text = narrador.load_continuous_text(input_path)
-            if len(normalized_text) > MAX_TEXT_CHARACTERS:
-                return _error(
-                    "O texto ultrapassa o limite de 20.000 caracteres para uma geração.",
-                    422,
-                )
+            input_path.write_text(normalized_text, encoding="utf-8")
 
             if not generation_slot.acquire(blocking=False):
                 response = jsonify(

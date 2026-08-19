@@ -28,6 +28,11 @@ DEFAULT_OUTPUT = Path("narration_synchronized.mp3")
 DEFAULT_VOICE = "pt-BR-FranciscaNeural"
 SAMPLE_RATE = 24_000
 MAX_CONTINUOUS_TEXT_CHARACTERS = 20_000
+FORBIDDEN_BIDI_CHARACTERS = frozenset(
+    chr(codepoint)
+    for start, end in ((0x202A, 0x202E), (0x2066, 0x2069))
+    for codepoint in range(start, end + 1)
+)
 
 
 class NarrationError(RuntimeError):
@@ -59,6 +64,41 @@ def normalize_continuous_text(content: str) -> str:
     return "\n\n".join(normalized_paragraphs)
 
 
+def validate_continuous_text(content: str) -> str:
+    """Valida Unicode e devolve exatamente o texto normalizado enviado ao TTS."""
+    # Um BOM inicial representa a codificação do documento; no meio do texto,
+    # ele é um caractere de formatação invisível e deve ser rejeitado.
+    if content.startswith("\ufeff"):
+        content = content[1:]
+    if "\ufeff" in content:
+        raise NarrationError("O texto contém um marcador BOM interno inválido.")
+
+    if any(character in FORBIDDEN_BIDI_CHARACTERS for character in content):
+        raise NarrationError("O texto contém caracteres bidirecionais invisíveis.")
+
+    invalid_control = next(
+        (
+            character
+            for character in content
+            if unicodedata.category(character) == "Cc"
+            and character not in "\n\r\t"
+        ),
+        None,
+    )
+    if invalid_control is not None:
+        raise NarrationError("O texto contém caracteres de controle inválidos.")
+
+    normalized = normalize_continuous_text(content)
+    has_visible_character = any(
+        not character.isspace()
+        and unicodedata.category(character) not in {"Cc", "Cf", "Zl", "Zp"}
+        for character in normalized
+    )
+    if not normalized or not has_visible_character:
+        raise NarrationError("O texto não contém caracteres visíveis para narrar.")
+    return normalized
+
+
 def load_continuous_text(input_path: Path) -> str:
     """Lê um TXT UTF-8/BOM e preserva sua estrutura semântica para o TTS."""
     if not input_path.is_file():
@@ -73,22 +113,7 @@ def load_continuous_text(input_path: Path) -> str:
     except OSError as exc:
         raise NarrationError(f"Não foi possível ler {input_path}: {exc}") from exc
 
-    invalid_control = next(
-        (
-            character
-            for character in source
-            if unicodedata.category(character) == "Cc"
-            and character not in "\n\r\t"
-        ),
-        None,
-    )
-    if invalid_control is not None:
-        raise NarrationError("O arquivo TXT contém caracteres de controle inválidos.")
-
-    normalized = normalize_continuous_text(source)
-    if not normalized:
-        raise NarrationError("O arquivo TXT está vazio.")
-    return normalized
+    return validate_continuous_text(source)
 
 
 def normalize_audio(audio: AudioSegment) -> AudioSegment:

@@ -9,9 +9,10 @@ entonação natural da voz selecionada.
 
 1. Confirme que o Python e o FFmpeg estão instalados e disponíveis no `PATH`.
 2. Dê dois cliques em `iniciar.bat`.
-3. No navegador, escolha o modo **SRT sincronizado** ou **Texto corrido**, envie
-   um arquivo `.srt` ou `.txt`, selecione a voz e clique em **Gerar narração**.
-4. Ouça a prévia e baixe o MP3.
+3. No navegador, escolha o modo **SRT sincronizado** ou **Texto corrido**. No
+   segundo modo, envie um `.txt` ou cole/digite o conteúdo diretamente.
+4. Selecione a voz e clique em **Gerar narração**.
+5. Ouça a prévia e baixe o MP3.
 
 O modo SRT baixa `narration_synchronized.mp3`; o modo texto corrido baixa
 `narration_continuous.mp3`.
@@ -68,7 +69,8 @@ acesso externo caso ele não deva ficar disponível ao público.
 
 ## Limites da interface
 
-- Arquivo SRT ou TXT de até 5 MB, codificado em UTF-8.
+- Arquivo SRT ou TXT de até 5 MB, codificado em UTF-8. O texto também pode ser
+  colado ou digitado diretamente na interface.
 - No modo SRT, linha do tempo de até 3 horas e até 10.000 blocos.
 - Até 300.000 caracteres falados no modo SRT e 20.000 no modo texto corrido.
 - Uma geração por vez no servidor local.

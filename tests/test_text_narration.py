@@ -7,6 +7,8 @@ from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
+from werkzeug.datastructures import MultiDict
+
 import app as web
 import narrador
 
@@ -38,6 +40,21 @@ class ContinuousTextTests(unittest.TestCase):
             invalid_control.write_bytes(b"texto\x00oculto")
             with self.assertRaisesRegex(narrador.NarrationError, "controle"):
                 narrador.load_continuous_text(invalid_control)
+
+    def test_shared_validation_rejects_dangerous_or_invisible_unicode(self) -> None:
+        self.assertEqual(
+            narrador.validate_continuous_text("\ufeffOlá!"),
+            "Olá!",
+        )
+        for content in (
+            "texto\ufeffinterno",
+            "texto\u202einvertido",
+            "texto\u2066isolado",
+            "\u200b\u2060",
+        ):
+            with self.subTest(content=ascii(content)):
+                with self.assertRaises(narrador.NarrationError):
+                    narrador.validate_continuous_text(content)
 
     def test_build_uses_one_logical_synthesis_call(self) -> None:
         calls: list[tuple[str, Path, int]] = []
@@ -85,9 +102,27 @@ class TextNarrationEndpointTests(unittest.TestCase):
         web.app.config.update(TESTING=True)
         self.client = web.app.test_client()
 
-    def _post(self, content: bytes, filename: str = "texto.txt", **fields: str):
+    def test_index_offers_file_and_direct_text_sources(self) -> None:
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn('name="textSource" value="file"', html)
+        self.assertIn('name="textSource" value="content"', html)
+        self.assertIn('textarea\n                id="textContent"', html)
+        self.assertIn('name="content"', html)
+
+    def _post(self, file_content: bytes, filename: str = "texto.txt", **fields: str):
         data = {
-            "text": (BytesIO(content), filename),
+            "text": (BytesIO(file_content), filename),
+            "voice": "pt-BR-FranciscaNeural",
+        }
+        data.update(fields)
+        return self.client.post("/api/text-narrations", data=data)
+
+    def _post_content(self, content: str, **fields: str):
+        data = {
+            "content": content,
             "voice": "pt-BR-FranciscaNeural",
         }
         data.update(fields)
@@ -114,9 +149,113 @@ class TextNarrationEndpointTests(unittest.TestCase):
         self.assertIn("20.000", response.get_json()["error"])
 
     def test_rejects_upload_larger_than_five_megabytes(self) -> None:
-        response = self._post(b"a" * (web.MAX_TEXT_BYTES + 1))
-        self.assertEqual(response.status_code, 413)
-        self.assertTrue(response.is_json)
+        for payload in (
+            b"a" * (web.MAX_TEXT_BYTES + 1),
+            b" " * (web.MAX_TEXT_BYTES + 1),
+        ):
+            with self.subTest(whitespace_only=not bool(payload.strip())):
+                response = self._post(payload)
+                self.assertEqual(response.status_code, 413)
+                self.assertTrue(response.is_json)
+
+    def test_accepts_direct_content_and_uses_shared_normalization(self) -> None:
+        received: list[tuple[str, str]] = []
+
+        async def fake_build(
+            input_path: Path, output_path: Path, voice: str
+        ) -> None:
+            received.append((narrador.load_continuous_text(input_path), voice))
+            output_path.write_bytes(b"ID3-direct-content")
+
+        with patch.object(web.narrador, "build_text_narration", fake_build):
+            # Formulários de navegador podem enviar o input de arquivo vazio.
+            response = self.client.post(
+                "/api/text-narrations",
+                data={
+                    "text": (BytesIO(b""), ""),
+                    "content": "  Olá, mundo!\r\n\r\n  Segundo parágrafo.  ",
+                    "voice": "pt-BR-FranciscaNeural",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, b"ID3-direct-content")
+        self.assertEqual(
+            received,
+            [("Olá, mundo!\n\nSegundo parágrafo.", "pt-BR-FranciscaNeural")],
+        )
+
+    def test_rejects_empty_direct_content(self) -> None:
+        for content in ("", "  \r\n\t  "):
+            with self.subTest(content=repr(content)):
+                response = self._post_content(content)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("vazio", response.get_json()["error"])
+
+    def test_rejects_two_useful_text_sources(self) -> None:
+        response = self._post(b"Texto do arquivo.", content="Texto digitado.")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("não ambos", response.get_json()["error"])
+
+    def test_rejects_duplicate_file_parts_and_content_fields(self) -> None:
+        duplicate_files = MultiDict(
+            [
+                ("text", (BytesIO(b"Primeiro."), "primeiro.txt")),
+                ("text", (BytesIO(b"Segundo."), "segundo.txt")),
+                ("voice", "pt-BR-FranciscaNeural"),
+            ]
+        )
+        response = self.client.post("/api/text-narrations", data=duplicate_files)
+        self.assertEqual(response.status_code, 400)
+
+        duplicate_content = MultiDict(
+            [
+                ("content", "Primeiro."),
+                ("content", "Segundo."),
+                ("voice", "pt-BR-FranciscaNeural"),
+            ]
+        )
+        response = self.client.post("/api/text-narrations", data=duplicate_content)
+        self.assertEqual(response.status_code, 400)
+
+    def test_direct_content_reuses_controls_and_character_limit(self) -> None:
+        self.assertEqual(self._post_content("texto\x00oculto").status_code, 422)
+
+        for content in ("texto\u202eoculto", "texto\ufeffoculto", "\u200b\u2060"):
+            with self.subTest(content=ascii(content)):
+                self.assertEqual(self._post_content(content).status_code, 422)
+
+        response = self._post_content("a" * (web.MAX_TEXT_CHARACTERS + 1))
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("20.000", response.get_json()["error"])
+
+    def test_character_limit_uses_normalized_tts_text(self) -> None:
+        async def fake_build(
+            input_path: Path, output_path: Path, _voice: str
+        ) -> None:
+            self.assertEqual(narrador.load_continuous_text(input_path), "Texto curto.")
+            output_path.write_bytes(b"ID3-normalized-limit")
+
+        raw_content = "Texto curto." + (" " * (web.MAX_TEXT_CHARACTERS + 1))
+        with patch.object(web.narrador, "build_text_narration", fake_build):
+            response = self._post_content(raw_content)
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_accepts_twenty_thousand_unicode_codepoints(self) -> None:
+        async def fake_build(
+            input_path: Path, output_path: Path, _voice: str
+        ) -> None:
+            self.assertEqual(
+                len(narrador.load_continuous_text(input_path)),
+                web.MAX_TEXT_CHARACTERS,
+            )
+            output_path.write_bytes(b"ID3-unicode-limit")
+
+        with patch.object(web.narrador, "build_text_narration", fake_build):
+            response = self._post_content("😀" * web.MAX_TEXT_CHARACTERS)
+
+        self.assertEqual(response.status_code, 200)
 
     def test_returns_continuous_mp3_attachment(self) -> None:
         received: list[tuple[str, str]] = []
