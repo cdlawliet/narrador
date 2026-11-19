@@ -75,8 +75,13 @@ acesso externo caso ele não deva ficar disponível ao público.
 - Até 300.000 caracteres falados no modo SRT e 20.000 no modo texto corrido.
 - Uma geração por vez no servidor local.
 
-Os arquivos são temporários, mas o texto das falas é enviado ao serviço online
-do Microsoft Edge TTS. Se ele falhar, o Google TTS é utilizado como alternativa.
+O Microsoft Edge TTS recebe o texto para sintetizar a voz selecionada. Se o
+serviço falhar, a interface mostra um erro para que você possa tentar novamente.
+
+No SRT, cada fala começa no timestamp original e termina até o fim da legenda
+ou o início da próxima fala, o que vier antes. Se necessário, a reprodução é
+acelerada em até 2×, com o tom preservado. Se o texto ainda não couber, a
+interface indica qual legenda precisa de mais tempo ou de um texto mais curto.
 
 ## Linha de comando
 

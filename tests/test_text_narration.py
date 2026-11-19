@@ -297,7 +297,7 @@ class TextNarrationEndpointTests(unittest.TestCase):
     def test_maps_voice_service_failure_without_internal_details(self) -> None:
         async def failed_build(*_args) -> None:
             raise narrador.NarrationError(
-                "Os dois mecanismos de voz falharam. detalhe privado"
+                "O serviço de voz não conseguiu sintetizar. detalhe privado"
             )
 
         with patch.object(web.narrador, "build_text_narration", failed_build):
@@ -306,7 +306,10 @@ class TextNarrationEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
         self.assertEqual(
             response.get_json(),
-            {"error": "O serviço de voz está indisponível no momento."},
+            {
+                "error": "O serviço de voz não conseguiu gerar a voz selecionada. "
+                "Tente novamente em instantes."
+            },
         )
 
     def test_existing_srt_endpoint_remains_available(self) -> None:

@@ -52,7 +52,7 @@ const MODES = {
     button: "Gerar narração sincronizada",
     resultTitle: "Sua narração sincronizada está pronta",
     downloadName: "narration_synchronized.mp3",
-    footnote: "Falas maiores que a legenda são preservadas e podem se sobrepor.",
+    footnote: "Falas longas são aceleradas para caber no tempo disponível.",
     messages: [
       "Enviando e validando o SRT…",
       "Gerando as falas em português…",
@@ -322,6 +322,13 @@ async function getErrorMessage(response) {
 
 modeInputs.forEach((input) => {
   input.addEventListener("change", applyMode);
+});
+
+form.querySelectorAll('input[name="voice"]').forEach((input) => {
+  input.addEventListener("change", () => {
+    clearError();
+    revokeResult();
+  });
 });
 
 textSourceInputs.forEach((input) => {

@@ -7,6 +7,7 @@ import asyncio
 import os
 import re
 import shutil
+import subprocess
 import sys
 import unicodedata
 from datetime import timedelta
@@ -27,6 +28,7 @@ DEFAULT_INPUT = Path("input.srt")
 DEFAULT_OUTPUT = Path("narration_synchronized.mp3")
 DEFAULT_VOICE = "pt-BR-FranciscaNeural"
 SAMPLE_RATE = 24_000
+MAX_SPEECH_TEMPO = 2.0
 MAX_CONTINUOUS_TEXT_CHARACTERS = 20_000
 FORBIDDEN_BIDI_CHARACTERS = frozenset(
     chr(codepoint)
@@ -187,75 +189,71 @@ def audio_from_mp3(path: Path) -> AudioSegment:
 
 
 class SpeechSynthesizer:
-    """Usa edge-tts e troca para gTTS se o mecanismo principal falhar."""
+    """Sintetiza com a voz solicitada no Edge TTS."""
 
     def __init__(self, voice: str) -> None:
         self.voice = voice
-        self.edge_enabled = True
-        self.fallback_announced = False
 
     async def synthesize(
         self, text: str, workdir: Path, sequence: int
     ) -> AudioSegment:
-        edge_error: Exception | None = None
-
-        if self.edge_enabled:
-            edge_path = workdir / f"edge_{sequence:06d}.mp3"
-            try:
-                import edge_tts
-
-                communication = edge_tts.Communicate(
-                    text=text,
-                    voice=self.voice,
-                    rate="+0%",
-                    volume="+0%",
-                    pitch="+0Hz",
-                    connect_timeout=10,
-                    receive_timeout=60,
-                )
-                await communication.save(str(edge_path))
-                return audio_from_mp3(edge_path)
-            except Exception as exc:
-                edge_error = exc
-                self.edge_enabled = False
-
-        if not self.fallback_announced:
-            reason = _exception_message(edge_error) if edge_error else "indisponível"
-            print(
-                f"Aviso: edge-tts falhou ({reason}). Usando gTTS como fallback.",
-                file=sys.stderr,
-            )
-            self.fallback_announced = True
-
-        gtts_path = workdir / f"gtts_{sequence:06d}.mp3"
+        edge_path = workdir / f"edge_{sequence:06d}.mp3"
         try:
-            from gtts import gTTS
+            import edge_tts
 
-            def save_with_gtts() -> None:
-                # pt + domínio brasileiro é a configuração pt-BR do gTTS.
-                gTTS(
-                    text=text,
-                    lang="pt",
-                    tld="com.br",
-                    slow=False,
-                    timeout=30,
-                ).save(str(gtts_path))
-
-            await asyncio.to_thread(save_with_gtts)
-            return audio_from_mp3(gtts_path)
-        except Exception as gtts_error:
-            edge_reason = _exception_message(edge_error) if edge_error else "indisponível"
+            communication = edge_tts.Communicate(
+                text=text,
+                voice=self.voice,
+                connect_timeout=10,
+                receive_timeout=60,
+            )
+            await communication.save(str(edge_path))
+            return audio_from_mp3(edge_path)
+        except Exception as exc:
+            status = getattr(exc, "status", None)
+            detail = f"HTTP {status}" if isinstance(status, int) else type(exc).__name__
             raise NarrationError(
-                "Os dois mecanismos de voz falharam. "
-                f"edge-tts: {edge_reason}; gTTS: {_exception_message(gtts_error)}"
-            ) from gtts_error
+                f"O serviço de voz não conseguiu sintetizar {self.voice} ({detail})."
+            ) from exc
 
 
-def _exception_message(error: Exception | None) -> str:
-    if error is None:
-        return "erro desconhecido"
-    message = str(error).strip()
-    return message if message else type(error).__name__
+def fit_speech(speech: AudioSegment, available_ms: int, label: int) -> AudioSegment:
+    """Ajusta o tempo sem mudar o tom e confere a quantidade real de amostras."""
+    frame_limit = available_ms * SAMPLE_RATE // 1_000
+    byte_limit = frame_limit * speech.frame_width
+    if available_ms > 0 and len(speech.raw_data) <= byte_limit:
+        return speech
+
+    if available_ms > 0:
+        # O atempo pode devolver alguns milissegundos a mais que o estimado.
+        target_ms = max(1, available_ms - min(30, available_ms // 20))
+        tempo = min(MAX_SPEECH_TEMPO, len(speech) / target_ms)
+        for speed in dict.fromkeys((max(1.0, tempo), MAX_SPEECH_TEMPO)):
+            try:
+                result = subprocess.run(
+                    [
+                        "ffmpeg", "-hide_banner", "-loglevel", "error",
+                        "-f", "s16le", "-ar", str(SAMPLE_RATE), "-ac", "1",
+                        "-i", "pipe:0", "-af", f"atempo={speed:.8f}",
+                        "-f", "s16le", "pipe:1",
+                    ],
+                    input=speech.raw_data,
+                    capture_output=True,
+                    check=True,
+                    timeout=60,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                raise NarrationError("Falha ao ajustar a duração com FFmpeg.") from exc
+
+            if 0 < len(result.stdout) <= byte_limit:
+                return AudioSegment(
+                    result.stdout, sample_width=2, frame_rate=SAMPLE_RATE, channels=1
+                )
+
+    raise NarrationError(
+        f"A fala da legenda {label} não cabe no intervalo de {available_ms / 1_000:g} s. "
+        "Aumente o intervalo ou encurte o texto da legenda."
+    )
 
 
 def export_mp3(timeline: AudioSegment, output_path: Path) -> None:
@@ -299,8 +297,6 @@ async def build_text_narration(
         workdir = Path(temporary_directory)
         print("Gerando narração do texto corrido...")
         try:
-            # Uma única chamada lógica mantém o mecanismo e a voz consistentes.
-            # edge-tts e gTTS fazem internamente a segmentação necessária.
             speech = await synthesizer.synthesize(text, workdir, 1)
         except NarrationError as exc:
             raise NarrationError(f"Falha ao narrar o texto: {exc}") from exc
@@ -331,19 +327,28 @@ async def build_narration(
     )
     timeline = silent_audio(final_subtitle_ms)
     synthesizer = SpeechSynthesizer(voice)
-    spoken_count = 0
+    spoken_subtitles = [
+        (position, subtitle, text)
+        for position, subtitle in enumerate(subtitles, start=1)
+        if (text := normalize_text(subtitle.content))
+    ]
 
     with TemporaryDirectory(prefix="narrador_tts_") as temporary_directory:
         workdir = Path(temporary_directory)
 
-        for position, subtitle in enumerate(subtitles, start=1):
-            text = normalize_text(subtitle.content)
-            if not text:
-                continue
-
+        for i, (position, subtitle, text) in enumerate(spoken_subtitles):
             start_ms = timedelta_to_milliseconds(subtitle.start)
             end_ms = timedelta_to_milliseconds(subtitle.end)
+            if i + 1 < len(spoken_subtitles):
+                next_start = spoken_subtitles[i + 1][1].start
+                end_ms = min(end_ms, timedelta_to_milliseconds(next_start))
             label = subtitle.index if subtitle.index is not None else position
+            available_ms = end_ms - start_ms
+            if available_ms <= 0:
+                raise NarrationError(
+                    f"A legenda {label} ficou sem intervalo para narrar. "
+                    "Verifique os timestamps do SRT."
+                )
             print(f"[{position}/{len(subtitles)}] Gerando legenda {label}...")
 
             try:
@@ -351,16 +356,10 @@ async def build_narration(
             except NarrationError as exc:
                 raise NarrationError(f"Falha na legenda {label}: {exc}") from exc
 
-            # O overlay trunca o trecho que excede o fundo. Amplie a linha do
-            # tempo para preservar falas longas e permitir sobreposições.
-            required_length = max(end_ms, start_ms + len(speech))
-            if required_length > len(timeline):
-                timeline += silent_audio(required_length - len(timeline))
-
+            speech = fit_speech(speech, available_ms, label)
             timeline = timeline.overlay(speech, position=start_ms)
-            spoken_count += 1
 
-    if spoken_count == 0 and len(timeline) == 0:
+    if not spoken_subtitles and len(timeline) == 0:
         raise NarrationError("O arquivo SRT não contém texto nem duração de áudio.")
 
     export_mp3(timeline, output_path)

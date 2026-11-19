@@ -119,9 +119,13 @@ def _narration_error_status(error: NarrationError) -> int:
 
     if "ffmpeg não foi encontrado" in message:
         return 503
-    if "mecanismos de voz falharam" in message or "serviço de voz" in message:
+    if "serviço de voz" in message:
         return 502
-    if "não foi possível salvar" in message or "falha ao exportar" in message:
+    if (
+        "não foi possível salvar" in message
+        or "falha ao exportar" in message
+        or "falha ao ajustar a duração" in message
+    ):
         return 500
     return 422
 
@@ -222,7 +226,7 @@ def create_narration():
             app.logger.error("Falha ao gerar narração: %s", error)
             public_messages = {
                 500: "Não foi possível concluir a geração do MP3.",
-                502: "O serviço de voz está indisponível no momento.",
+                502: "O serviço de voz não conseguiu gerar a voz selecionada. Tente novamente em instantes.",
                 503: "O FFmpeg não está disponível neste computador.",
             }
             return _error(public_messages.get(status, "Falha interna na geração."), status)
@@ -294,7 +298,7 @@ def create_text_narration():
             app.logger.error("Falha ao gerar narração de texto: %s", error)
             public_messages = {
                 500: "Não foi possível concluir a geração do MP3.",
-                502: "O serviço de voz está indisponível no momento.",
+                502: "O serviço de voz não conseguiu gerar a voz selecionada. Tente novamente em instantes.",
                 503: "O FFmpeg não está disponível neste computador.",
             }
             return _error(public_messages.get(status, "Falha interna na geração."), status)
